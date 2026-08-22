@@ -53,6 +53,29 @@ def describe_table(table: str) -> list[dict[str, object]]:
     ]
 
 
+@server.tool()
+def run_query(sql: str) -> list[dict[str, object]]:
+    """Run a read-only SELECT query against the database and return the rows."""
+    # Tidy the input so a trailing semicolon or stray spacing does not
+    # confuse the check below.
+    statement = sql.strip().rstrip(";").strip()
+
+    # Guard: nothing but SELECT gets through.
+    if not statement.lower().startswith("select"):
+        raise ValueError("Only SELECT statements are allowed.")
+
+    conn = sqlite3.connect(DB_PATH)
+    # row_factory makes each row behave like a dict instead of a bare tuple,
+    # so the column names travel with the values.
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(statement).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
 def main() -> None:
     # Start listening. Default transport is stdio.
     server.run()
