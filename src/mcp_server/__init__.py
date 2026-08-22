@@ -7,6 +7,26 @@ from mcp.server import MCPServer
 DB_PATH = Path(__file__).parent.parent.parent / "sample.db"
 
 # The server object. The name is how clients identify us.
+# Columns the model is never allowed to read, as (table, column) pairs.
+BLOCKED_COLUMNS = {
+    ("customers", "email"),
+    ("customers", "phone"),
+}
+
+
+def _authorizer(action, arg1, arg2, db_name, trigger_name):
+    """Called by SQLite before it touches anything.
+
+    For a read, arg1 is the table and arg2 is the column. Returning
+    SQLITE_DENY makes the whole query fail inside the engine.
+    """
+    if action == sqlite3.SQLITE_READ:
+        pair = ((arg1 or "").lower(), (arg2 or "").lower())
+        if pair in BLOCKED_COLUMNS:
+            return sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
+
+
 server = MCPServer(name="sql-explorer")
 
 
@@ -68,8 +88,11 @@ def run_query(sql: str) -> list[dict[str, object]]:
     # row_factory makes each row behave like a dict instead of a bare tuple,
     # so the column names travel with the values.
     conn.row_factory = sqlite3.Row
+    conn.set_authorizer(_authorizer)
     try:
         rows = conn.execute(statement).fetchall()
+    except sqlite3.DatabaseError as exc:
+        raise ValueError(f"Query refused: {exc}") from None
     finally:
         conn.close()
 
