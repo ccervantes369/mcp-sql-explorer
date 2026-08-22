@@ -27,6 +27,32 @@ def list_tables() -> list[str]:
     return [r[0] for r in rows]
 
 
+@server.tool()
+def describe_table(table: str) -> list[dict[str, object]]:
+    """Describe the columns of one table: name, type, and whether it is required."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        # A table name cannot be passed as a "?" parameter, so we check it
+        # against the real table list before letting it near the SQL.
+        known = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        if table not in known:
+            raise ValueError(f"Unknown table: {table!r}")
+
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    finally:
+        conn.close()
+
+    return [
+        {"name": row[1], "type": row[2], "required": bool(row[3])}
+        for row in rows
+    ]
+
+
 def main() -> None:
     # Start listening. Default transport is stdio.
     server.run()
