@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Generated sample database (rebuild with scripts/make_sample_db.py)
+sample.db
