@@ -102,12 +102,46 @@ start. A typo in a security setting should be loud, not silently ignored.
 `run_query` reports `truncated: true` when the result hit the row cap, so a
 partial answer is never mistaken for a complete one.
 
+## Resources
+
+| URI | Content |
+|---|---|
+| `schema://tables` | Every table with its columns, one line each |
+| `schema://{table}` | One table in detail: column name, type, whether required |
+
+Columns the server refuses to read are marked `[blocked]`:
+
+```
+customers(id, name, email [blocked], phone [blocked], city, signup_date)
+```
+
+That is deliberate. The protection does not depend on secrecy — the
+authorizer refuses regardless of what the caller knows — so naming the
+blocked columns costs nothing and saves a wasted `SELECT *` that would only
+be rejected.
+
+`schema://{table}` is a *template*: one definition serves one address per
+table, whatever tables the database turns out to have.
+
+## Prompts
+
+| Prompt | What it does |
+|---|---|
+| `analyze_table(table)` | Walks one table: size, distributions, gaps, outliers |
+| `data_quality_report()` | Audits for duplicates, orphans, impossible values, suspicious uniformity |
+
+Prompts return instructions, not data. They describe how to drive this
+server well — read the schema first, aggregate rather than list rows, do not
+reach for blocked columns — so a user who does not know the database can
+still ask a good question.
+
 ## Design notes
 
-**Why the schema is a tool, not a resource.** MCP also offers *resources*
-for readable content. A schema would fit there, but tools are supported by
-every client today, and the model needs the schema on demand rather than
-attached up front.
+**Why the schema is both a tool and a resource.** `describe_table` returns
+structured rows for a model to compute with; `schema://customers` returns a
+readable page a person can attach to a conversation. The same information in
+two shapes, because tools and resources are consumed differently. The tool is
+also the reliable path, since resource support still varies between clients.
 
 **Why `SELECT *` is refused.** The expansion includes the blocked columns,
 so the authorizer denies it. The model has to name the columns it wants.
