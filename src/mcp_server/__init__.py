@@ -165,6 +165,41 @@ def run_query(sql: str) -> dict[str, object]:
     }
 
 
+@server.resource("schema://tables", mime_type="text/plain")
+def schema_overview() -> str:
+    """Every table in the database, with its columns, as one readable page."""
+    lines = []
+    for table in list_tables():
+        names = [_describe_column(table, col) for col in describe_table(table)]
+        lines.append(f"{table}({', '.join(names)})")
+    return "\n".join(lines)
+
+
+@server.resource("schema://{table}", mime_type="text/plain")
+def table_schema(table: str) -> str:
+    """The columns of one table.
+
+    The {table} in the URI makes this a template: one function serves
+    schema://customers, schema://orders, and any table another database
+    happens to have.
+    """
+    lines = [f"Table: {table}", ""]
+    for col in describe_table(table):
+        needed = "required" if col["required"] else "optional"
+        label = _describe_column(table, col)
+        lines.append(f"  {label:<24} {col['type']:<8} {needed}")
+    return "\n".join(lines)
+
+
+def _describe_column(table: str, col: dict) -> str:
+    """Column name, marked if the server would refuse to read it."""
+    name = str(col["name"])
+    if (table.lower(), name.lower()) in BLOCKED_COLUMNS:
+        return f"{name} [blocked]"
+    return name
+
+
+
 def main() -> None:
     # Start listening. Default transport is stdio.
     server.run()
