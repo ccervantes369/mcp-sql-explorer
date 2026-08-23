@@ -1,23 +1,49 @@
+import os
 import sqlite3
 import time
 from pathlib import Path
 
 from mcp.server import MCPServer
 
-# Where the database lives: three folders up from this file, then sample.db
-DB_PATH = Path(__file__).parent.parent.parent / "sample.db"
+# Used when nobody says otherwise: the practice database in this repo.
+DEFAULT_DB_PATH = Path(__file__).parent.parent.parent / "sample.db"
 
-# The server object. The name is how clients identify us.
+# Which database to serve. Set SQL_EXPLORER_DB to point at your own file.
+DB_PATH = Path(os.environ.get("SQL_EXPLORER_DB") or DEFAULT_DB_PATH)
+
 # Never return more rows than this in one call, and never let a query run
 # longer than this many seconds.
 MAX_ROWS = 500
 QUERY_TIMEOUT_SECONDS = 5.0
 
-# Columns the model is never allowed to read, as (table, column) pairs.
-BLOCKED_COLUMNS = {
-    ("customers", "email"),
-    ("customers", "phone"),
-}
+DEFAULT_BLOCKED_COLUMNS = "customers.email, customers.phone"
+
+
+def _parse_blocked_columns(raw: str) -> set[tuple[str, str]]:
+    """Turn "customers.email, customers.phone" into {("customers", "email"), ...}.
+
+    Anything not written as table.column is a mistake worth failing loudly
+    for: a typo here silently leaves a column unprotected.
+    """
+    blocked = set()
+    for item in raw.split(","):
+        item = item.strip().lower()
+        if not item:
+            continue
+        if item.count(".") != 1:
+            raise ValueError(
+                f"Blocked columns must be written as table.column, got {item!r}"
+            )
+        table, column = item.split(".")
+        blocked.add((table, column))
+    return blocked
+
+
+# Columns the model is never allowed to read. Override with
+# SQL_EXPLORER_BLOCKED_COLUMNS, e.g. "users.password_hash, users.ssn".
+BLOCKED_COLUMNS = _parse_blocked_columns(
+    os.environ.get("SQL_EXPLORER_BLOCKED_COLUMNS") or DEFAULT_BLOCKED_COLUMNS
+)
 
 
 def _authorizer(action, arg1, arg2, db_name, trigger_name):
@@ -46,6 +72,7 @@ def _make_progress_handler(deadline: float):
     return handler
 
 
+# The server object. The name is how clients identify us.
 server = MCPServer(name="sql-explorer")
 
 
