@@ -200,6 +200,50 @@ def _describe_column(table: str, col: dict) -> str:
 
 
 
+@server.prompt()
+def analyze_table(table: str) -> str:
+    """Explore one table properly: size, distributions, gaps and outliers."""
+    return f"""Investigate the "{table}" table in this database and report what you find.
+
+Work through it in this order, using run_query for each step:
+
+1. Size. How many rows are there?
+2. Shape. Read schema://{table} to see the columns. Columns marked
+   [blocked] cannot be read, so do not try.
+3. Distributions. For each text column with few distinct values, show the
+   counts per value. For each numeric column, report min, max and average.
+4. Gaps. Which columns contain empty strings or nulls, and how often?
+5. Outliers. Show the handful of rows with the most extreme numeric values.
+
+Keep every query small. Aggregate rather than listing rows, and never
+select more than you need: results are capped at 500 rows.
+
+Finish with a short plain-language summary of what the data appears to be
+and anything that looks worth a second look."""
+
+
+@server.prompt()
+def data_quality_report() -> str:
+    """Hunt for broken or suspicious data across the whole database."""
+    return """Audit this database for data quality problems.
+
+Start by reading schema://tables to see what exists, then look for:
+
+- Duplicates. Rows that appear to be the same real thing recorded twice.
+- Orphans. Rows referencing an id that does not exist in the parent table.
+- Impossible values. Negative amounts, dates in the future, dates before
+  the thing they belong to, empty required fields.
+- Suspicious uniformity. A column where nearly every row holds the same
+  value is often a bug rather than a fact.
+
+Use aggregate queries and counts rather than dumping rows. For each problem
+you find, report the query that found it, how many rows are affected, and
+one example.
+
+If you find nothing wrong, say so plainly rather than inventing concerns."""
+
+
+
 def main() -> None:
     # Start listening. Default transport is stdio.
     server.run()
