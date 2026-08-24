@@ -49,7 +49,7 @@ git clone <your-repo-url>
 cd mcp_server
 uv sync
 uv run python scripts/make_sample_db.py   # builds the practice database
-uv run pytest                             # 21 tests
+uv run pytest                             # 28 tests
 ```
 
 To poke at the tools by hand in a browser (needs Node.js):
@@ -86,6 +86,9 @@ work — the app overwrites it on exit.
 |---|---|---|
 | `SQL_EXPLORER_DB` | `sample.db` in this repo | Which SQLite file to serve |
 | `SQL_EXPLORER_BLOCKED_COLUMNS` | `customers.email, customers.phone` | Columns to deny, as `table.column`, comma separated |
+| `SQL_EXPLORER_TRANSPORT` | `stdio` | `stdio` or `streamable-http` |
+| `SQL_EXPLORER_PORT` | `8000` | Port to listen on, HTTP transport only |
+| `SQL_EXPLORER_TOKEN` | none | Bearer token required by the HTTP transport. No default, and no server without it |
 
 A value that is not shaped like `table.column` makes the server refuse to
 start. A typo in a security setting should be loud, not silently ignored.
@@ -135,6 +138,57 @@ server well — read the schema first, aggregate rather than list rows, do not
 reach for blocked columns — so a user who does not know the database can
 still ask a good question.
 
+## Running it over HTTP
+
+By default the server runs on **stdio**: a client launches it as a child
+process and they talk over pipes. Nothing needs authenticating, because
+the operating system already decided who may start the process.
+
+Set `SQL_EXPLORER_TRANSPORT=streamable-http` and it becomes a web service
+instead — and then anyone who can reach the port can talk to it. So a token
+is mandatory:
+
+```bash
+SQL_EXPLORER_TRANSPORT=streamable-http \
+SQL_EXPLORER_TOKEN=$(python -c "import secrets; print(secrets.token_urlsafe(32))") \
+uv run mcp-server
+```
+
+Every request must carry it:
+
+```bash
+curl -X POST http://127.0.0.1:8000/mcp \
+  -H "Authorization: Bearer $SQL_EXPLORER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
+```
+
+Anything else gets `401` and never reaches a tool, a resource, or the
+database.
+
+**With no `SQL_EXPLORER_TOKEN` set, the server refuses to start.** It does
+not fall back to running open with a warning printed somewhere. A missed
+warning leaves the database published while everything looks healthy, which
+is the worst kind of failure: silent, and indistinguishable from success.
+
+The listener binds `127.0.0.1`. Read the security note below before
+changing that.
+
+### Before exposing this to a network
+
+- **TLS is not optional.** A bearer token over plain HTTP travels in clear
+  text; anyone between the client and the server can read it and reuse it.
+  Put this behind a reverse proxy that terminates HTTPS.
+- **A shared token is not OAuth.** The MCP specification calls for OAuth 2.1
+  for remote servers, which gives per-user identity, scopes and revocation.
+  One shared secret gives none of those: every caller is the same caller,
+  and rotating it locks everyone out at once. That is a reasonable trade for
+  a single-user or small-team service, and the wrong one for a public
+  deployment.
+- **Rate limiting is absent.** Nothing here slows down a caller hammering
+  expensive queries.
+
 ## Design notes
 
 **Why the schema is both a tool and a resource.** `describe_table` returns
@@ -166,7 +220,7 @@ not an escape.
 uv run pytest -v
 ```
 
-Twenty-one tests in two files.
+Twenty-eight tests in three files.
 
 `tests/test_guards.py` covers every safety guard: refused statements,
 refused columns including the filter-only leak, truncation, unknown table
@@ -176,8 +230,15 @@ names, and the query timeout.
 what the prompts say, including that blocked columns keep their `[blocked]`
 marker and that the prompts still name the tools and URIs they rely on.
 
+`tests/test_http_auth.py` covers the HTTP door: a correct token passes, a
+missing header, a wrong token, a bare token without the `Bearer` prefix and
+a truncated token are all refused, and the server refuses to start in HTTP
+mode with no token set. Each refusal asserts the request never reached the
+endpoint, not merely that the status was `401`.
+
 `tests/conftest.py` builds the sample database if it is missing, so the
 suite runs on a fresh clone.
 
-Both files call the server's functions directly rather than through an MCP
-session, so they would not catch a decorator being removed.
+The guard and resource tests call the server's functions directly rather
+than through an MCP session, so they would not catch a decorator being
+removed.
