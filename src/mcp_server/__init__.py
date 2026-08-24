@@ -1,9 +1,12 @@
 import os
+import secrets
 import sqlite3
 import time
 from pathlib import Path
 
 from mcp.server import MCPServer
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 # Used when nobody says otherwise: the practice database in this repo.
 DEFAULT_DB_PATH = Path(__file__).parent.parent.parent / "sample.db"
@@ -244,6 +247,27 @@ If you find nothing wrong, say so plainly rather than inventing concerns."""
 
 
 
+class TokenAuthMiddleware(BaseHTTPMiddleware):
+    """Reject any HTTP request that does not carry the expected token.
+
+    This sits in front of the MCP app, so an unauthenticated request never
+    reaches a tool, a resource, or the database.
+    """
+
+    def __init__(self, app, token: str) -> None:
+        super().__init__(app)
+        self._expected = f"Bearer {token}"
+
+    async def dispatch(self, request, call_next):
+        presented = request.headers.get("authorization", "")
+        # compare_digest takes the same time whether the first character
+        # is wrong or only the last one, so it does not leak the token
+        # to someone measuring how long the rejection took.
+        if not secrets.compare_digest(presented, self._expected):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return await call_next(request)
+
+
 def main() -> None:
     """Start the server on the transport named by SQL_EXPLORER_TRANSPORT.
 
@@ -253,6 +277,8 @@ def main() -> None:
     transport = os.environ.get("SQL_EXPLORER_TRANSPORT", "stdio")
 
     if transport == "stdio":
+        # Nothing to authenticate: whoever launched this process is already
+        # trusted by the operating system.
         server.run()
         return
 
@@ -261,10 +287,22 @@ def main() -> None:
             f"Unknown transport {transport!r}. Use 'stdio' or 'streamable-http'."
         )
 
-    # Bound to localhost deliberately. There is no authentication yet, so
-    # this must not be reachable from the network.
-    server.run(
-        transport="streamable-http",
+    token = os.environ.get("SQL_EXPLORER_TOKEN")
+    if not token:
+        raise ValueError(
+            "SQL_EXPLORER_TOKEN must be set to serve over HTTP. Refusing to "
+            "start an unauthenticated server."
+        )
+
+    import uvicorn
+
+    app = server.streamable_http_app()
+    app.add_middleware(TokenAuthMiddleware, token=token)
+
+    # Bound to localhost deliberately. Exposing this beyond the machine
+    # needs TLS as well as a token: without it the header travels in clear.
+    uvicorn.run(
+        app,
         host="127.0.0.1",
         port=int(os.environ.get("SQL_EXPLORER_PORT", "8000")),
     )
