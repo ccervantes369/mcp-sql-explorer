@@ -49,7 +49,7 @@ git clone <your-repo-url>
 cd mcp_server
 uv sync
 uv run python scripts/make_sample_db.py   # builds the practice database
-uv run pytest                             # 13 tests, all guards covered
+uv run pytest                             # 21 tests
 ```
 
 To poke at the tools by hand in a browser (needs Node.js):
@@ -166,7 +166,18 @@ not an escape.
 uv run pytest -v
 ```
 
-Thirteen tests, covering every guard: refused statements, refused columns
-(including the filter-only leak), truncation, unknown table names, and the
-query timeout. `tests/conftest.py` builds the sample database if it is
-missing, so the suite runs on a fresh clone.
+Twenty-one tests in two files.
+
+`tests/test_guards.py` covers every safety guard: refused statements,
+refused columns including the filter-only leak, truncation, unknown table
+names, and the query timeout.
+
+`tests/test_resources_and_prompts.py` covers what the resources render and
+what the prompts say, including that blocked columns keep their `[blocked]`
+marker and that the prompts still name the tools and URIs they rely on.
+
+`tests/conftest.py` builds the sample database if it is missing, so the
+suite runs on a fresh clone.
+
+Both files call the server's functions directly rather than through an MCP
+session, so they would not catch a decorator being removed.
