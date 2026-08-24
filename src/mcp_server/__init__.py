@@ -245,5 +245,26 @@ If you find nothing wrong, say so plainly rather than inventing concerns."""
 
 
 def main() -> None:
-    # Start listening. Default transport is stdio.
-    server.run()
+    """Start the server on the transport named by SQL_EXPLORER_TRANSPORT.
+
+    Defaults to stdio, which is how a desktop client launches this as a
+    child process. Set "streamable-http" to run it as a web service.
+    """
+    transport = os.environ.get("SQL_EXPLORER_TRANSPORT", "stdio")
+
+    if transport == "stdio":
+        server.run()
+        return
+
+    if transport != "streamable-http":
+        raise ValueError(
+            f"Unknown transport {transport!r}. Use 'stdio' or 'streamable-http'."
+        )
+
+    # Bound to localhost deliberately. There is no authentication yet, so
+    # this must not be reachable from the network.
+    server.run(
+        transport="streamable-http",
+        host="127.0.0.1",
+        port=int(os.environ.get("SQL_EXPLORER_PORT", "8000")),
+    )
